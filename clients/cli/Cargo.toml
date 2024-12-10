@@ -84,7 +84,9 @@ semver = "1.0.23"
 parking_lot = "0.12.3"
 colored = "2.1.0"
 md5 = "0.7.0"
-
+# github 的 https://github.com/0xNaixi/fireauth/commit/e24d4026b9e0b46fefae46dfd98e193dca9752a1
+fireauth = {git = "https://github.com/0xNaixi/fireauth.git", rev = "e24d4026b9e0b46fefae46dfd98e193dca9752a1"}
+base64 = "0.22.1"
 [patch.crates-io]
 ark-crypto-primitives = { git = "https://github.com/arkworks-rs/crypto-primitives", rev = "d27a5c8" }
 

@@ -49,17 +49,24 @@ use nexus_core::{
 use std::fs;
 use std::fs::File;
 use std::io::Read;
+use base64::Engine;
+use chrono::Local;
 use zstd::stream::Encoder;
 
 use crate::utils::updater::AutoUpdaterMode;
-
+use base64::prelude::BASE64_URL_SAFE;
 // The interval at which to send updates to the orchestrator
 const PROOF_PROGRESS_UPDATE_INTERVAL_IN_SECONDS: u64 = 180; // 3 minutes
 
 #[derive(Parser, Debug)]
 struct Args {
     /// Hostname at which Orchestrator can be reached
+    #[arg(default_value_t = String::from("beta.orchestrator.nexus.xyz"))]
     hostname: String,
+
+    // 运行标识 用于鉴别不同的用户 比如 1，2，3，方便批量运行
+    #[arg(short, long, default_value_t = String::from("1"))]
+    run_id: String,
 
     /// Port over which to communicate with Orchestrator
     #[arg(short, long, default_value_t = 443u16)]
@@ -81,6 +88,24 @@ fn get_file_as_byte_vec(filename: &str) -> Vec<u8> {
     f.read_exact(&mut buffer).expect("buffer overflow");
 
     buffer
+}
+
+
+fn generate_firebase_client() -> String {
+    // 获取当前日期，格式为 YYYY-MM-DD
+    let today = Local::now().format("%Y-%m-%d").to_string();
+
+    // 构建 JSON 数据
+    let data = json!({
+        "version": 2,
+        "heartbeats": [{
+            "agent": "fire-core/0.10.2 fire-core-esm2017/0.10.2 fire-js/ fire-js-all-cdn/10.11.1 fire-iid/0.6.6 fire-iid-esm2017/0.6.6 fire-analytics/0.10.2 fire-analytics-esm2017/0.10.2 fire-auth/1.7.2 fire-auth-esm2017/1.7.2 fire-fst/4.6.1 fire-fst-esm2017/4.6.1",
+            "dates": [today]
+        }]
+    });
+
+    // 将 JSON 转换为字符串并进行 base64 编码
+    BASE64_URL_SAFE.encode(data.to_string())
 }
 
 #[tokio::main]
@@ -113,8 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pp = gen_vm_pp::<C1, seq::SetupParams<(G1, G2, C1, C2, RO, SC)>>(k as usize, &())
         .expect("error generating public parameters");
 
-    // get or generate the prover id
-    let prover_id = prover_id_manager::get_or_generate_prover_id();
+    let prover_id = prover_id_manager::get_or_generate_prover_id_custom(&args.run_id).await?;
 
     println!(
         "\n\t✔ Your current prover identifier is {}",

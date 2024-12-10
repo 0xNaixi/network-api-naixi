@@ -2,6 +2,8 @@ use colored::Colorize;
 use rand::RngCore;
 use random_word::Lang;
 use std::{fs, path::Path, path::PathBuf};
+use fireauth::RequestCustomData;
+use crate::generate_firebase_client;
 
 /// Gets an existing prover ID from the filesystem or generates a new one
 /// This is the main entry point for getting a prover ID
@@ -139,6 +141,55 @@ fn handle_read_error(e: std::io::Error, path: &Path, default_id: &str) {
             );
         }
     }
+}
+
+
+/// Retrieves or generates a custom prover ID for a given run ID.
+///
+/// # Arguments
+/// * `run_id` - A unique identifier for the current run
+///
+/// # Returns
+/// A Result containing either the prover ID string or an error
+pub async fn get_or_generate_prover_id_custom(run_id: &str) -> Result<String, Box<dyn std::error::Error>>{
+    // Check if prover_id_1.txt exists in the current folder, where 1 is the run_id.
+    let file_path = format!("prover_id_{}.txt", run_id);
+    // Try to read existing prover ID from JSON file
+    if let Ok(content) = fs::read_to_string(&file_path) {
+        // Parse the JSON content and extract local_id
+        let user_info: fireauth::api::User = serde_json::from_str(&content)?;
+        return Ok(user_info.local_id);
+    }
+    // If it doesn't exist, generate a default prover_id and save it to file
+    let firebase_client = generate_firebase_client();
+    // println!("firebase_client: {:?}", firebase_client);
+    let request_custom_data = RequestCustomData{
+        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36".to_string(),
+        client_data: "CI62yQEIorbJAQipncoBCKTwygEIlKHLAQiGoM0BCPzQzgEIn9LOARiPzs0B".to_string(),
+        client_version: "Chrome/JsCore/10.11.1/FirebaseCore-web".to_string(),
+        firebase_client,
+        firebase_gmpid: "1:279395003658:web:04ee2c524474d683d75ef3".to_string(),
+    };
+    let auth = fireauth::FireAuth::new(
+        "AIzaSyDqxeUH3_ixM-rTPMHAMWrF2jTFslKUf0U".to_string(),
+        Some(request_custom_data),
+    );
+    let user = auth.sign_up_email(None, None, true).await?;
+    let user_info = auth.get_user_info(&user.id_token).await?;
+    // println!("user_info: {:?}", user_info);
+    // 将两个结构体转换为 JSON 对象
+
+    let mut combined = serde_json::to_value(&user)?;
+    let user_info_value = serde_json::to_value(&user_info)?;
+    if let (serde_json::Value::Object(ref mut combined_map), serde_json::Value::Object(user_info_map)) = (combined, user_info_value) {
+        // 合并字段，user_info 的值会覆盖 user 中的重复字段
+        combined_map.extend(user_info_map);
+        // 序列化并保存
+        let json_string = serde_json::to_string_pretty(&combined_map)?;
+        fs::write(file_path, json_string).unwrap();
+    }
+
+    Ok(user_info.local_id)
 }
 
 #[cfg(test)]
