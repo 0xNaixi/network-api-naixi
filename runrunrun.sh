@@ -1,5 +1,9 @@
 #!/bin/bash
-
+# 进入指定目录
+cd "$(dirname "$0")/clients/cli" || {
+    echo "错误：无法进入 clients/cli 目录"
+    exit 1
+}
 INSTANCE_COUNT=2000
 BASE_RUN_ID="abuabu"
 RUN_MODE=0
