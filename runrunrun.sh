@@ -7,8 +7,14 @@ RUN_MODE=0
 echo "Starting $INSTANCE_COUNT instances..."
 
 for i in $(seq 1 $INSTANCE_COUNT); do
-    # 使用 nohup 确保断开连接后进程继续运行
-    nohup cargo run --release --bin prover -- beta.orchestrator.nexus.xyz --run-id ${BASE_RUN_ID}${i} --run-mode $RUN_MODE > /dev/null 2>&1 &
+    # 构建完整的命令字符串
+    CMD="nohup cargo run --release --bin prover -- beta.orchestrator.nexus.xyz --run-id ${BASE_RUN_ID}${i} --run-mode $RUN_MODE > /dev/null 2>&1 &"
+
+    # 打印命令
+    echo "Executing: $CMD"
+
+    # 执行命令
+    eval "$CMD"
 
     echo "Started instance $i/$INSTANCE_COUNT"
 
