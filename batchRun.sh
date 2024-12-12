@@ -14,11 +14,11 @@ fi
 
 
 while true; do
-    read -p "请输入要运行的实例数量: " instance_count
-    if [[ "$instance_count" =~ ^[0-1000]+$ ]]; then
+    read -p "请输入要运行的实例数量 (1-1000): " instance_count
+    if [[ "$instance_count" =~ ^[1-9][0-9]{0,2}$ ]] && [ "$instance_count" -le 1000 ]; then
         break
     else
-        echo "错误：请输入有效的数字"
+        echo "错误：请输入1到1000之间的有效数字"
     fi
 done
 
@@ -32,14 +32,17 @@ while true; do
     fi
 done
 
-# 创建一个新的 tmux 会话
-session_name="prover_session"
+read -p "请输入 tmux 会话名称 (直接回车默认为 prover_session): " session_name
+if [ -z "$session_name" ]; then
+    session_name="prover_session"
+fi
+
 tmux new-session -d -s "$session_name"
 
 # 为每个实例创建一个新的窗口并运行命令
 for ((i=1; i<=instance_count; i++)); do
     # 构建完整的命令
-    cmd="cargo run --release --bin prover -- beta.orchestrator.nexus.xyz --run-id ${main_name}${i} ----run-mode ${fake_mode}"
+    cmd="cargo run --release --bin prover -- beta.orchestrator.nexus.xyz --run-id ${main_name}${i} --run-mode ${fake_mode}"
 
     if [ $i -eq 1 ]; then
         # 第一个窗口已经存在，只需要发送命令
@@ -60,3 +63,5 @@ done
 echo "所有实例已启动，正在连接到 tmux 会话..."
 sleep 2
 tmux attach-session -t "$session_name"
+
+# 关闭命令 tmux kill-session -t prover_session
