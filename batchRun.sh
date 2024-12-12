@@ -21,6 +21,13 @@ if ! [[ "$instance_count" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
+# 询问 fake 模式 0 或者 1
+read -p "是否使用 fake 模式 (0 或 1): " fake_mode
+# 验证 fake_mode 输入是否有效
+if ! [[ "$fake_mode" =~ ^[0-1]$ ]]; then
+    echo "错误：fake 模式只能是 0 或 1"
+    exit 1
+fi
 # 创建一个新的 tmux 会话
 session_name="prover_session"
 tmux new-session -d -s "$session_name"
@@ -28,7 +35,7 @@ tmux new-session -d -s "$session_name"
 # 为每个实例创建一个新的窗口并运行命令
 for ((i=1; i<=instance_count; i++)); do
     # 构建完整的命令
-    cmd="cargo run --release --bin prover -- beta.orchestrator.nexus.xyz --run-id ${main_name}${i}"
+    cmd="cargo run --release --bin prover -- beta.orchestrator.nexus.xyz --run-id ${main_name}${i} ----run-mode ${fake_mode}"
 
     if [ $i -eq 1 ]; then
         # 第一个窗口已经存在，只需要发送命令
