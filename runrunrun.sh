@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # 设置实例数量
-INSTANCE_COUNT=3000
+INSTANCE_COUNT=500
 # 设置基础运行ID
 BASE_RUN_ID="abu"
 # 设置运行模式
-RUN_MODE=1
+RUN_MODE=0
 
 echo "Starting $INSTANCE_COUNT instances..."
 
