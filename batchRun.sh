@@ -12,22 +12,26 @@ if [ -z "$main_name" ]; then
     main_name="nexus"
 fi
 
-# 询问要运行多少个实例
-read -p "请输入要运行的实例数量: " instance_count
 
-# 验证输入是否为数字
-if ! [[ "$instance_count" =~ ^[0-9]+$ ]]; then
-    echo "错误：请输入有效的数字"
-    exit 1
-fi
+while true; do
+    read -p "请输入要运行的实例数量: " instance_count
+    if [[ "$instance_count" =~ ^[0-1000]+$ ]]; then
+        break
+    else
+        echo "错误：请输入有效的数字"
+    fi
+done
 
 # 询问 fake 模式 0 或者 1
-read -p "是否使用 fake 模式 (0 或 1): " fake_mode
-# 验证 fake_mode 输入是否有效
-if ! [[ "$fake_mode" =~ ^[0-1]$ ]]; then
-    echo "错误：fake 模式只能是 0 或 1"
-    exit 1
-fi
+while true; do
+    read -p "是否使用 fake 模式 (0 或 1): " fake_mode
+    if [[ "$fake_mode" =~ ^[0-1]$ ]]; then
+        break
+    else
+        echo "错误：fake 模式只能是 0 或 1"
+    fi
+done
+
 # 创建一个新的 tmux 会话
 session_name="prover_session"
 tmux new-session -d -s "$session_name"
