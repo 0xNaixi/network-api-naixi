@@ -4,9 +4,11 @@ version = "0.4.0"
 edition = "2021"
 
 [[bin]]
+name = "proverTest"
+path = "src/prover_test.rs"
+[[bin]]
 name = "prover"
 path = "src/prover.rs"
-
 [build-dependencies]
 prost-build = "0.13"
 
@@ -87,6 +89,7 @@ md5 = "0.7.0"
 # github 的 https://github.com/0xNaixi/fireauth/commit/e24d4026b9e0b46fefae46dfd98e193dca9752a1
 fireauth = {git = "https://github.com/0xNaixi/fireauth.git", rev = "e24d4026b9e0b46fefae46dfd98e193dca9752a1"}
 base64 = "0.22.1"
+lazy_static = "1.5.0"
 [patch.crates-io]
 ark-crypto-primitives = { git = "https://github.com/arkworks-rs/crypto-primitives", rev = "d27a5c8" }
 

@@ -1768,6 +1768,7 @@ dependencies = [
  "home",
  "iana-time-zone",
  "jsonrpsee",
+ "lazy_static",
  "md5",
  "nexus-core",
  "parking_lot",

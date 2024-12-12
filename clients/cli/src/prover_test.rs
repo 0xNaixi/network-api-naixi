@@ -36,23 +36,30 @@ use tokio_tungstenite::tungstenite::protocol::{
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::EnvFilter;
 
-use crate::prover_random::{generate_random_proof_request, load_stats};
-use crate::utils::updater::AutoUpdaterMode;
-use base64::prelude::BASE64_URL_SAFE;
 use base64::Engine;
 use chrono::Local;
-use nexus_core::prover::nova::{
-    key::CanonicalSerialize, types::*,
+use nexus_core::{
+    nvm::{
+        interactive::{parse_elf, trace},
+        memory::MerkleTrie,
+        NexusVM,
+    },
+    prover::nova::{
+        init_circuit_trace, key::CanonicalSerialize, pp::gen_vm_pp, prove_seq_step, types::*,
+    },
 };
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::fs::File;
 use std::io::{Read, Write};
-use std::str::FromStr;
+use zstd::stream::Encoder;
+
+use crate::prover_random::{save_stats, ProofStats};
+use crate::utils::updater::AutoUpdaterMode;
+use base64::prelude::BASE64_URL_SAFE;
+use serde::{Deserialize, Serialize};
 
 // The interval at which to send updates to the orchestrator
 const PROOF_PROGRESS_UPDATE_INTERVAL_IN_SECONDS: u64 = 180; // 3 minutes
-
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -63,10 +70,6 @@ struct Args {
     // 运行标识 用于鉴别不同的用户 比如 1，2，3，方便批量运行
     #[arg(short, long, default_value_t = String::from("1"))]
     run_id: String,
-
-    //run_mode 运行模式 默认 整数 0
-    #[arg(short, long, default_value_t = 0u8)]
-    run_mode: u8,
 
     /// Port over which to communicate with Orchestrator
     #[arg(short, long, default_value_t = 443u16)]
@@ -89,6 +92,7 @@ fn get_file_as_byte_vec(filename: &str) -> Vec<u8> {
 
     buffer
 }
+
 
 fn generate_firebase_client() -> String {
     // 获取当前日期，格式为 YYYY-MM-DD
@@ -124,6 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let args = Args::parse();
+    let mut proof_stats = ProofStats::default();
     let ws_addr_string = format!(
         "{}://{}:{}/prove",
         if args.port == 443 { "wss" } else { "ws" },
@@ -131,22 +136,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.port
     );
 
-    //打印 fake_mode
-    println!(
-        "\n\t✔ Your current run mode is {}",
-        args.run_mode
-    );
-
     let k = 4;
+    // TODO(collinjackson): Get parameters from a file or URL.
+    let pp = gen_vm_pp::<C1, seq::SetupParams<(G1, G2, C1, C2, RO, SC)>>(k as usize, &())
+        .expect("error generating public parameters");
+
     let prover_id = prover_id_manager::get_or_generate_prover_id_custom(&args.run_id).await?;
+
     println!(
         "\n\t✔ Your current prover identifier is {}",
         prover_id.bright_cyan()
     );
+
     println!(
         "\n===== {}...\n",
-        "Connecting to Nexus Network Fake".bold().underline()
+        "Connecting to Nexus Network".bold().underline()
     );
+
     track(
         "connect".into(),
         format!("Connecting to {}...", &ws_addr_string),
@@ -171,77 +177,98 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         false,
     );
 
+    let mut queued_proof_duration_millis = 0;
+    let mut queued_steps_proven: i32 = 0;
     let mut timer_since_last_orchestrator_update = Instant::now();
+
     println!(
         "\n===== {}...\n",
         "Starting proof generation for programs".bold().underline()
     );
-    let stats = load_stats().expect("Failed to load stats");
 
     loop {
+        // Create the inputs for the program
+        use rand::Rng; // Required for .gen() methods
+        let mut rng = rand::thread_rng();
+        let input = vec![5, rng.gen::<u8>(), rng.gen::<u8>()];
+
         let program_name = utils::prover::get_program_for_prover(&prover_id);
+        let program_file_path = &format!("src/generated/{}", program_name);
+
+        let mut vm: NexusVM<MerkleTrie> =
+            parse_elf(get_file_as_byte_vec(program_file_path).as_ref())
+                .expect("error loading and parsing RISC-V instruction");
+        vm.syscalls.set_input(&input);
+
+        // TODO(collinjackson): Get outputs
+        let completed_trace = trace(&mut vm, k as usize, false).expect("error generating trace");
+        let tr = init_circuit_trace(completed_trace).expect("error initializing circuit trace");
+
+        let total_steps = tr.steps();
+        let start = 0;
+        let steps_to_prove = 10;
+        let mut end: usize = start + steps_to_prove;
+        if end > total_steps {
+            end = total_steps
+        }
+
+        let z_st = tr.input(start).expect("error starting circuit trace");
+        let mut proof = IVCProof::new(&z_st);
+
+        let mut steps_proven = 0;
+
         println!(
-            "\n\t✔ Proving program {} with prover {}",
-            program_name.bright_cyan(),
-            prover_id.bright_cyan()
+            "Program trace is {} steps. Proving {} steps starting at {}...",
+            total_steps, steps_to_prove, start
         );
+
         let start_time = Instant::now();
         let mut progress_time = start_time;
-        let mut steps_proven = 0;
-        let steps_to_prove = 10;
-        let start = 0u8;
-        let end = 10u8;
+        //高亮打印出 start 和 end
+        println!(
+            "Proving steps {} to {} of the program trace...",
+            start.to_string().bright_yellow(),
+            end.to_string().bright_yellow()
+        );
         for step in start..end {
-            if args.run_mode == 0 {
-                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-            }else{
-                // 随机延迟 0.3 - 0.7
-                let delay = rand::random::<u64>() % 400 + 300;
-                tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-            }
-            let progress = generate_random_proof_request(&program_name, &stats);
-            let total_steps = 196i32;
-            let mut queued_steps_proven = progress.steps_proven;
-            steps_proven = queued_steps_proven;
-            let start = progress.step_to_start;
-            let mut queued_proof_duration_millis = progress.proof_duration_millis;
-            // 随机延迟 0.3 - 0.7 毫秒
-            let delay = rand::random::<u64>() % 400 + 300;
-            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-            let progress:ClientProgramProofRequest= match &args.run_mode{
-                1 => {
-                    // queued_steps_proven 随机 10 到 50 万
-                    queued_steps_proven = (rand::random::<u32>() % 500000 + 10000) as i32;
-                    steps_proven = queued_steps_proven;
-                    ClientProgramProofRequest {
-                        steps_in_trace: total_steps,
-                        steps_proven: queued_steps_proven,
-                        step_to_start: start,
-                        program_id: program_name.clone(),
-                        client_id_token: None,
-                        proof_duration_millis: queued_proof_duration_millis,
-                        k,
-                        cli_prover_id: Some(prover_id.clone()),
-                    }
-            }
-                _ => {
-                    ClientProgramProofRequest {
-                        steps_in_trace: total_steps,
-                        steps_proven: queued_steps_proven,
-                        step_to_start: start,
-                        program_id: program_name.clone(),
-                        client_id_token: None,
-                        proof_duration_millis: queued_proof_duration_millis,
-                        k,
-                        cli_prover_id: Some(prover_id.clone()),
-                    }
-                }
+            proof = prove_seq_step(Some(proof), &pp, &tr).expect("error proving step");
+            steps_proven += 1;
+
+            let progress_duration = progress_time.elapsed();
+            let proof_cycles_hertz = k as f64 * 1000.0 / progress_duration.as_millis() as f64;
+
+            //update the queued variables
+            queued_proof_duration_millis += progress_duration.as_millis() as i32;
+            queued_steps_proven += steps_proven;
+
+            let progress = ClientProgramProofRequest {
+                steps_in_trace: total_steps as i32,
+                steps_proven: queued_steps_proven,
+                step_to_start: start as i32,
+                program_id: program_name.clone(),
+                client_id_token: None,
+                proof_duration_millis: queued_proof_duration_millis,
+                k,
+                cli_prover_id: Some(prover_id.clone()),
             };
+            // println!("\t{:#?}", progress);
+
+
+            // //把 progress 转换为 JSON 字符串 并且保存到文件中 (追加 记得换行)
+            let progress_json = serde_json::to_string_pretty(&progress)?;
+            let progress_json_str = progress_json.to_string();
+            // let progress_json_file_path = format!("src/progress_{}.json", prover_id);
+            // let mut file = OpenOptions::new()
+            //     .create(true)     // 如果文件不存在则创建
+            //     .append(true)     // 追加模式
+            //     .open(&progress_json_file_path)?;
+            // file.write_all(progress_json_str.as_bytes())?;
+            // Print the proof progress in green or blue depending on the step number
             println!(
-                "\t✔ Generated proof request for program {} with prover {}",
-                program_name.bright_cyan(),
-                prover_id.bright_cyan()
+                "\t✓ Proved step {} at {:.2} proof cycles/sec.",
+                step, proof_cycles_hertz
             );
+
             progress_time = Instant::now();
             //If it has been three minutes since the last orchestrator update, send the orchestator the update
             if timer_since_last_orchestrator_update.elapsed().as_secs()
@@ -263,28 +290,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             //... and the pong was received
                             Ok(Some(Ok(Message::Pong(_)))) => {
                                 // Connection is verified working
+                                proof_stats.proof_duration_millis.update(queued_proof_duration_millis);
+                                proof_stats.steps_proven.update(queued_steps_proven);
+                                proof_stats.steps_in_trace.update(total_steps as i32);
+                                proof_stats.step_to_start.update(start as i32);
+                                proof_stats.k.update(k);
+                                save_stats(&proof_stats)?;
+                                //高亮打印progress
+                                println!(
+                                    "Sent progress to orchestrator: {}",
+                                    progress_json_str.bright_yellow()
+                                );
                                 match client.send(Message::Binary(progress.encode_to_vec())).await {
                                     Ok(_) => {
                                         // println!("\t\tSuccesfully sent progress to orchestrator\n");
-                                        //高亮显示成功
-                                        println!("{:#?}",progress);
-                                        println!(
-                                            "\t✔ Successfully sent progress to orchestrator\n"
-                                        );
                                         // println!("{:#?}", progress);
+
                                         // Reset the queued values only after successful send
                                         queued_steps_proven = 0;
                                         queued_proof_duration_millis = 0;
-                                        // let user_cycles_proved_request = UserCyclesProvedRequest {
-                                        //     client_ids: vec![],
-                                        // };
                                     }
                                     Err(_) => {
                                         client = match connect_to_orchestrator_with_limited_retry(
                                             &ws_addr_string,
                                             &prover_id,
                                         )
-                                            .await
+                                        .await
                                         {
                                             Ok(new_client) => new_client,
                                             Err(_) => {
@@ -306,7 +337,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     &ws_addr_string,
                                     &prover_id,
                                 )
-                                    .await
+                                .await
                                 {
                                     Ok(new_client) => new_client,
                                     Err(_) => {
@@ -327,7 +358,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             &ws_addr_string,
                             &prover_id,
                         )
-                            .await
+                        .await
                         {
                             Ok(new_client) => new_client,
                             Err(_) => {
@@ -343,10 +374,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             if step == end - 1 {
+                let mut buf = Vec::new();
+                let mut writer = Box::new(&mut buf);
+                let mut encoder = Encoder::new(&mut writer, 0).expect("failed to create encoder");
+                proof
+                    .serialize_compressed(&mut encoder)
+                    .expect("failed to compress proof");
+                encoder.finish().expect("failed to finish encoder");
+
                 let total_duration = start_time.elapsed();
                 let total_minutes = total_duration.as_secs() as f64 / 60.0;
                 let cycles_proved = steps_proven * k;
                 let proof_cycles_per_minute = cycles_proved as f64 / total_minutes;
+
                 // Send analytics about the proof event
                 track(
                     "proof".into(),
@@ -374,9 +414,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         } else {
             println!("\n\nWaiting for a new program to prove...\n");
-            //随机延迟1000-3000 毫秒
-            let delay = rand::random::<u64>() % 2000 + 1000;
-            tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
         }
     }
 

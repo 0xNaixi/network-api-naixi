@@ -1,9 +1,144 @@
 use colored::Colorize;
-use rand::RngCore;
+use rand::{thread_rng, Rng, RngCore};
 use random_word::Lang;
 use std::{fs, path::Path, path::PathBuf};
 use fireauth::RequestCustomData;
+use lazy_static::lazy_static;
+use rand::distributions::Alphanumeric;
 use crate::generate_firebase_client;
+
+lazy_static! {
+    static ref DOMAINS: Vec<&'static str> = vec![
+		"mymail.buzz",
+		"ddmygod.shop",
+		"whatyourmail.shop",
+		"acio.eu.org",
+		"aeri.eu.org",
+		"aois.eu.org",
+		"aure.eu.org",
+		"aver.eu.org",
+		"bcio.eu.org",
+		"brui.eu.org",
+		"bufo.eu.org",
+		"bure.eu.org",
+		"bver.eu.org",
+		"ccio.eu.org",
+		"ceri.eu.org",
+		"crui.eu.org",
+		"cufo.eu.org",
+		"dcio.eu.org",
+		"deri.eu.org",
+		"drui.eu.org",
+		"dufo.eu.org",
+		"dure.eu.org",
+		"ecio.eu.org",
+		"erui.eu.org",
+		"eufo.eu.org",
+		"fcio.eu.org",
+		"frui.eu.org",
+		"fufo.eu.org",
+		"fure.eu.org",
+		"gcio.eu.org",
+		"geri.eu.org",
+		"grui.eu.org",
+		"gufo.eu.org",
+		"gure.eu.org",
+		"hcio.eu.org",
+		"hrui.eu.org",
+		"hufo.eu.org",
+		"hure.eu.org",
+		"icio.eu.org",
+		"ieri.eu.org",
+		"iois.eu.org",
+		"irui.eu.org",
+		"iufo.eu.org",
+		"iure.eu.org",
+		"jcio.eu.org",
+		"jrui.eu.org",
+		"jufo.eu.org",
+		"kcio.eu.org",
+		"krui.eu.org",
+		"kufo.eu.org",
+		"kure.eu.org",
+		"lrui.eu.org",
+		"lufo.eu.org",
+		"nure.eu.org",
+		"pois.eu.org",
+		"rois.eu.org",
+		"seri.eu.org",
+		"sois.eu.org",
+		"tois.eu.org",
+		"uois.eu.org",
+		"wois.eu.org",
+		"yois.eu.org",
+		"fffy.eu.org",
+		"fffz.eu.org",
+		"ffhh.eu.org",
+		"ffii.eu.org",
+		"ffll.eu.org",
+		"ffpp.eu.org",
+		"ffqq.eu.org",
+		"ffuu.eu.org",
+		"ffvv.eu.org",
+		"ffww.eu.org",
+		"fhhh.eu.org",
+		"fiii.eu.org",
+		"fjjj.eu.org",
+		"fkkk.eu.org",
+		"fmmm.eu.org",
+		"fnnn.eu.org",
+		"fppp.eu.org",
+		"fqqq.eu.org",
+		"frfr.eu.org",
+		"frrr.eu.org",
+		"fsss.eu.org",
+		"fuuu.eu.org",
+		"hddmail.me",
+		"fvvv.eu.org",
+		"ethereums.sbs",
+		"ethereums.cfd",
+		"arbitrums.sbs",
+		"arbitrums.cfd",
+		"fridahook.com",
+		"fyyy.eu.org",
+		"gaaa.eu.org",
+		"gbbb.eu.org",
+		"gccc.eu.org",
+		"gddd.eu.org",
+		"gfff.eu.org",
+		"gggc.eu.org",
+		"gggd.eu.org",
+		"ggge.eu.org",
+		"gggf.eu.org",
+		"gggh.eu.org",
+		"gggj.eu.org",
+		"gggk.eu.org",
+		"gggl.eu.org",
+		"gggn.eu.org",
+		"gjjj.eu.org",
+		"guozi.eu.org",
+		"hgtr.eu.org",
+		"oray.eu.org",
+		"sdfew.eu.org",
+		"sgdh.eu.org",
+		"yssw.eu.org",
+		"fahoo.sbs",
+		"ggmail.cfd",
+		"zkscam.cfd",
+		"zkscam.cfd",
+		"boyemo.cyou",
+		"kiriot.cfd",
+		"sioio.sbs",
+		"openchain.buzz",
+		"misakahelper.com",
+		"tenderlygame.com",
+		"hautefroid.com",
+		"odosprotocol.com",
+		"trashmailgenerator.us",
+		"injectlib.de"
+    ];
+}
+
 
 /// Gets an existing prover ID from the filesystem or generates a new one
 /// This is the main entry point for getting a prover ID
@@ -174,7 +309,29 @@ pub async fn get_or_generate_prover_id_custom(run_id: &str) -> Result<String, Bo
         "AIzaSyDqxeUH3_ixM-rTPMHAMWrF2jTFslKUf0U".to_string(),
         Some(request_custom_data),
     );
-    let user = auth.sign_up_email(None, None, true).await?;
+
+    // 百分之 30 概率 使用 email
+    let mut rng = thread_rng();
+    let use_email = rng.gen_ratio(3, 10); // 30% 概率
+    let (email, password) = if use_email {
+        let len = rng.gen_range(6..11);
+        let prefix: String = (0..len)
+            .map(|_| rng.sample(Alphanumeric) as char)
+            .collect::<String>()
+            .to_lowercase();
+        let domain = DOMAINS[rng.gen_range(0..DOMAINS.len())];
+        let email = format!("{}@{}", prefix, domain);
+
+        println!(
+            "\n\t✔ Generated email: {}",
+            email
+        );
+
+        (Some(email), Some(prefix)) // 使用前缀作为密码
+    } else {
+        (None, None)
+    };
+    let user = auth.sign_up_email(email.as_deref(), password.as_deref(), true).await?;
     let user_info = auth.get_user_info(&user.id_token).await?;
     // println!("user_info: {:?}", user_info);
     // 将两个结构体转换为 JSON 对象
