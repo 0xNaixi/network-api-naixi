@@ -9,7 +9,6 @@ BASE_RUN_ID="abuabu"
 RUN_MODE=0
 
 echo "Starting $INSTANCE_COUNT instances..."
-
 for i in $(seq 1 $INSTANCE_COUNT); do
     # 构建完整的命令字符串
     CMD="nohup cargo run --release --bin prover -- beta.orchestrator.nexus.xyz --run-id ${BASE_RUN_ID}${i} --run-mode $RUN_MODE > /dev/null 2>&1 &"
